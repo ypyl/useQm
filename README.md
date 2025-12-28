@@ -1,0 +1,107 @@
+# useQm
+
+`useQm` is a lightweight, zero-dependency (except React) in-place alternative to libraries like React Query (but without caching, debouncing, or other advanced features). It allows you to decouple loading states, error handling, and data fetching/posting from your component logic.
+
+It is designed to be **copied directly into your project** rather than being installed as a formal library.
+
+## Key Features
+
+- **Decoupled States**: Separate `data`, `loading`, and `problemDetails` for clean UI logic.
+- **Problem Details Support**: Native support for `application/problem+json` style errors.
+- **Zero Configuration**: No complex setup required; `QmProvider` is optional.
+- **Type Safe**: First-class TypeScript support for both queries and mutations.
+- **Auto-abort**: Automatically cancels pending requests when a component unmounts or a new request is triggered.
+
+## Installation
+
+Since `useQm` is not a package, simply copy [useQm.tsx](./src/useQm.tsx) into your project's source directory (e.g., `src/hooks/useQm.tsx`).
+
+## Setup (Optional)
+
+You can optionally wrap your application with the `QmProvider` to provide global configuration for authentication and error tracking. If you don't need these features, you can skip this step entirely.
+
+```tsx
+import { QmProvider } from './hooks/useQm';
+
+function Root() {
+  return (
+    <QmProvider 
+      getAuthHeader={async () => `Bearer ${localStorage.getItem('token')}`}
+      trackError={(err, details) => console.error(err, details)}
+    >
+      <App />
+    </QmProvider>
+  );
+}
+```
+
+## Usage
+
+### Fetching Data (`useQuery`)
+
+The `useQuery` hook handles GET requests and manages the loading state automatically.
+
+```tsx
+import { useQuery } from './hooks/useQm';
+
+function UserList() {
+  const { data: users, loading, problemDetails, query: refetch } = useQuery<User[]>('/api/users');
+
+  if (loading) return <p>Loading...</p>;
+  if (problemDetails) return <p>Error: {problemDetails.title}</p>;
+
+  return (
+    <div>
+      <ul>
+        {users?.map(user => <li key={user.id}>{user.name}</li>)}
+      </ul>
+      <button onClick={() => refetch()}>Refresh</button>
+    </div>
+  );
+}
+```
+
+### Mutating Data (`useMutation`)
+
+The `useMutation` hook handles data modifications (POST, PUT, DELETE, etc.).
+
+```tsx
+import { useMutation } from './hooks/useQm';
+
+function CreateUser() {
+  const { mutate, loading } = useMutation<User>('/api/users/create');
+
+  const handleCreate = async () => {
+    const newUser = await mutate(undefined, {
+      body: JSON.stringify({ name: 'New User' })
+    });
+    
+    if (newUser) {
+      console.log('User created:', newUser);
+    }
+  };
+
+  return (
+    <button onClick={handleCreate} disabled={loading}>
+      {loading ? 'Creating...' : 'Add User'}
+    </button>
+  );
+}
+```
+
+## API Reference
+
+### `useQuery<T>(url, options?)`
+- **`data`**: The fetched data of type `T`.
+- **`loading`**: Boolean indicating if the fetch is in progress.
+- **`problemDetails`**: Error details if the request failed.
+- **`query()`**: Function to manually trigger or refetch.
+- **`abort()`**: Function to cancel the current request.
+
+### `useMutation<T>(url, options?)`
+- **`data`**: The result of the mutation.
+- **`loading`**: Boolean indicating if the mutation is in progress.
+- **`problemDetails`**: Error details if the request failed.
+- **`mutate(dynamicUrl?, dynamicOptions?)`**: Function to trigger the mutation.
+- **`abort()`**: Function to cancel the current request.
+
