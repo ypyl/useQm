@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
   useCallback,
@@ -15,23 +16,23 @@ export type ProblemDetails = {
   type?: string;
 };
 
-export interface UseFetchOptions extends RequestInit {
+export interface UseFetchOptions extends Omit<RequestInit, 'body'> {
   autoInvoke?: boolean;
   responseType?: "json" | "text" | "blob";
+  body?: BodyInit | Record<string, unknown> | null;
 }
+
+export type ExecuteRequest = string | (UseFetchOptions & { url?: string });
 
 export interface UseFetchReturnValue<T> {
   data: T | null;
   loading: boolean;
   problemDetails: ProblemDetails | null;
-  execute: (
-    dynamicUrl?: string,
-    dynamicOptions?: UseFetchOptions
-  ) => Promise<T | null>;
+  execute: (req?: ExecuteRequest) => Promise<T | null>;
   abort: () => void;
 }
 
-type TrackErrorFn = (error: Error, properties?: any) => void;
+type TrackErrorFn = (error: Error, properties?: unknown) => void;
 type GetAuthHeaderFn = () => Promise<string>;
 
 interface QmContextValue {
@@ -82,12 +83,19 @@ function useCoreFetch<T>(
   const shouldFetch = !!url;
 
   const execute = useCallback(
-    async (
-      dynamicUrl?: string,
-      dynamicOptions?: UseFetchOptions
-    ): Promise<T | null> => {
+    async (req?: ExecuteRequest): Promise<T | null> => {
       if (controller.current) {
         controller.current.abort();
+      }
+
+      let dynamicUrl: string | undefined;
+      let dynamicOptions: UseFetchOptions | undefined;
+      if (typeof req === "string") {
+        dynamicUrl = req;
+      } else if (req) {
+        const { url: reqUrl, ...rest } = req as UseFetchOptions & { url?: string };
+        dynamicUrl = reqUrl;
+        dynamicOptions = rest as UseFetchOptions;
       }
 
       const currentController = new AbortController();
@@ -105,18 +113,25 @@ function useCoreFetch<T>(
         const mergedOptions = { ...options, ...dynamicOptions };
         const responseType = mergedOptions.responseType;
         const method = mergedOptions.method || "GET";
-        
+
         const headers: HeadersInit = {
           ...(options?.headers || {}),
           ...(dynamicOptions?.headers || {}),
           ...(authHeader ? { Authorization: authHeader } : {}),
         };
 
+        // Auto-serialize body if it's an object
+        let body = mergedOptions.body;
+        if (body && typeof body === 'object' && !(body instanceof FormData) && !(body instanceof URLSearchParams) && !(body instanceof ReadableStream) && !(body instanceof ArrayBuffer) && !(body instanceof Blob)) {
+          body = JSON.stringify(body);
+        }
+
         const res = await fetch(url + (dynamicUrl || ""), {
           ...mergedOptions,
           signal: currentController.signal,
           method,
           headers,
+          body,
         });
 
         const contentType = res.headers.get("content-type") || "";
@@ -138,7 +153,7 @@ function useCoreFetch<T>(
           return null;
         }
 
-        let result: any;
+        let result: unknown;
         if (responseType === "blob") {
           const blob = await res.blob();
           let filename: string | undefined;
@@ -158,12 +173,17 @@ function useCoreFetch<T>(
         }
 
         setProblemDetails(null);
-        setData(result);
+        setData(result as T);
         return result as T;
-      } catch (err: any) {
-        if (err.name === "AbortError") return null;
-        setProblemDetails(err as ProblemDetails);
-        trackError?.(err);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") return null;
+        const problem: ProblemDetails = {
+          status: 0,
+          title: err instanceof Error ? err.name : "Network Error",
+          detail: err instanceof Error ? err.message : String(err)
+        };
+        setProblemDetails(problem);
+        trackError?.(err instanceof Error ? err : new Error(String(err)));
         return null;
       } finally {
         if (controller.current === currentController) {
@@ -176,7 +196,7 @@ function useCoreFetch<T>(
 
   const abort = useCallback(() => {
     if (controller.current) {
-      controller.current.abort("");
+      controller.current.abort();
     }
   }, []);
 

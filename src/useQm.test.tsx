@@ -171,8 +171,8 @@ describe("useQm", () => {
       });
 
       act(() => {
-        result.current.mutate(undefined, {
-          body: JSON.stringify({ name: "New" }),
+        result.current.mutate({
+          body: { name: "New" },
         });
       });
 
@@ -188,6 +188,65 @@ describe("useQm", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({ name: "New" }),
+        })
+      );
+    });
+
+    it("auto-serializes object bodies to JSON", async () => {
+      globalFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => "application/json" },
+        json: async () => ({ id: 1 }),
+      });
+
+      const { result } = renderHook(() => useMutation("/api/test"), {
+        wrapper,
+      });
+
+      const testObject = { name: "Test", value: 42 };
+
+      act(() => {
+        result.current.mutate({ body: testObject });
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(globalFetch).toHaveBeenCalledWith(
+        "/api/test",
+        expect.objectContaining({
+          body: JSON.stringify(testObject),
+        })
+      );
+    });
+
+    it("does not serialize FormData bodies", async () => {
+      globalFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => "application/json" },
+        json: async () => ({ success: true }),
+      });
+
+      const { result } = renderHook(() => useMutation("/api/upload"), {
+        wrapper,
+      });
+
+      const formData = new FormData();
+      formData.append("file", "test");
+
+      act(() => {
+        result.current.mutate({ body: formData });
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(globalFetch).toHaveBeenCalledWith(
+        "/api/upload",
+        expect.objectContaining({
+          body: formData,
         })
       );
     });
