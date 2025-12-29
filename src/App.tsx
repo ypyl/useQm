@@ -85,7 +85,7 @@ function App() {
     };
 
     const result = await createUser({
-      body: JSON.stringify(newUser),
+      body: newUser,
     });
 
     if (result) {

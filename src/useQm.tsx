@@ -233,11 +233,7 @@ export function useQuery<T>(
     autoInvoke: options?.autoInvoke ?? true,
   });
 
-  const query = useCallback(() => {
-    return execute();
-  }, [execute]);
-
-  return { ...rest, query };
+  return { ...rest, query: execute };
 }
 
 /**
