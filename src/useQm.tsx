@@ -34,10 +34,10 @@ export interface UseFetchReturnValue<T> {
 }
 
 type TrackErrorFn = (error: Error, properties?: unknown) => void;
-type GetAuthHeaderFn = () => Promise<string>;
+type GetAuthTokenFn = () => Promise<string>;
 
 interface QmContextValue {
-  getAuthHeader?: GetAuthHeaderFn;
+  getAuthToken?: GetAuthTokenFn;
   trackError?: TrackErrorFn;
 }
 
@@ -45,15 +45,15 @@ interface QmContextValue {
 const QmContext = createContext<QmContextValue | null>(null);
 
 export function QmProvider({
-  getAuthHeader,
+  getAuthToken,
   trackError,
   children,
 }: PropsWithChildren<{
-  getAuthHeader?: GetAuthHeaderFn;
+  getAuthToken?: GetAuthTokenFn;
   trackError?: TrackErrorFn;
 }>) {
   return (
-    <QmContext.Provider value={{ getAuthHeader, trackError }}>
+    <QmContext.Provider value={{ getAuthToken, trackError }}>
       {children}
     </QmContext.Provider>
   );
@@ -68,9 +68,9 @@ function useCoreFetch<T>(
   url: string,
   options?: UseFetchOptions
 ): UseFetchReturnValue<T> {
-  const { getAuthHeader, trackError } = useQmContext();
+  const { getAuthToken, trackError } = useQmContext();
   const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(() => Boolean(options?.autoInvoke && url));
   const [problemDetails, setProblemDetails] = useState<ProblemDetails | null>(
     null
   );
@@ -105,8 +105,11 @@ function useCoreFetch<T>(
 
       try {
         let authHeader: string | undefined;
-        if (getAuthHeader) {
-          authHeader = await getAuthHeader();
+        if (getAuthToken) {
+          const token = await getAuthToken();
+          if (token) {
+            authHeader = `Bearer ${token}`;
+          }
         }
 
         const options = optionsRef.current;
@@ -195,7 +198,7 @@ function useCoreFetch<T>(
         }
       }
     },
-    [url, getAuthHeader, trackError]
+    [url, getAuthToken, trackError]
   );
 
   const abort = useCallback(() => {
@@ -210,13 +213,150 @@ function useCoreFetch<T>(
 
   useEffect(() => {
     if (options?.autoInvoke && shouldFetch) {
-      // Execute immediately implies we shouldn't wait, but we need execute to be stable or this effect to run.
-      // We can just call execute.
-      execute().catch(() => {
-        // Already handled in execute
+      // Defer execution to avoid synchronous setState calls inside effects that can cause cascading renders.
+      // Scheduling with Promise resolves to a microtask to run after this effect completes.
+      Promise.resolve().then(() => {
+        execute().catch(() => {
+          // Already handled in execute
+        });
       });
     }
   }, [shouldFetch, options?.autoInvoke, execute]);
+
+  return { data, loading, problemDetails, execute, abort };
+}
+
+export interface UseSseOptions {
+  url?: string;
+  autoInvoke?: boolean;
+  authQueryParam?: string;
+}
+
+function appendAuthQueryParam(url: string, token: string, paramName: string) {
+  try {
+    const u = new URL(url, window.location.origin);
+    u.searchParams.set(paramName, token);
+    return u.toString();
+  } catch {
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}${encodeURIComponent(paramName)}=${encodeURIComponent(token)}`;
+  }
+}
+
+export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
+  const { url = "", authQueryParam = "access_token" } = options || {};
+  const { getAuthToken, trackError } = useQmContext();
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [problemDetails, setProblemDetails] = useState<ProblemDetails | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+  const optionsRef = useRef(options);
+
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+
+  const shouldConnect = !!url;
+
+  const execute = useCallback(
+    async (req?: ExecuteRequest): Promise<T | null> => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+
+      let dynamicUrl: string | undefined;
+      if (typeof req === "string") {
+        dynamicUrl = req;
+      } else if (req) {
+        dynamicUrl = req.url;
+      }
+
+      const baseUrl = url + (dynamicUrl || "");
+
+      try {
+        let finalUrl = baseUrl;
+        if (authQueryParam && getAuthToken) {
+          const token = await getAuthToken();
+          if (token) {
+            finalUrl = appendAuthQueryParam(baseUrl, token, authQueryParam);
+          }
+        }
+
+        const es = new EventSource(finalUrl);
+        esRef.current = es;
+        setLoading(true);
+        setProblemDetails(null);
+
+        es.onopen = () => {
+          setLoading(true);
+          setProblemDetails(null);
+        };
+
+        es.onmessage = (ev: MessageEvent) => {
+          try {
+            const parsed = ev.data ? JSON.parse(ev.data) : null;
+            setData(parsed as T);
+          } catch (err: unknown) {
+            const problem: ProblemDetails = {
+              status: 0,
+              title: err instanceof Error ? err.name : "ParseError",
+              detail: err instanceof Error ? err.message : String(err),
+            };
+            setProblemDetails(problem);
+            trackError?.(err instanceof Error ? err : new Error(String(err)), problem);
+          }
+        };
+
+        es.onerror = (ev: Event) => {
+          setLoading(false);
+          const problem: ProblemDetails = {
+            status: 0,
+            title: "EventSourceError",
+            detail: `EventSource connection error - ${ev.type}`,
+          };
+          setProblemDetails(problem);
+          trackError?.(new Error("EventSource error"), problem);
+        };
+
+        return null;
+      } catch (err: unknown) {
+        const problem: ProblemDetails = {
+          status: 0,
+          title: err instanceof Error ? err.name : "Error",
+          detail: err instanceof Error ? err.message : String(err),
+        };
+        setProblemDetails(problem);
+        trackError?.(err instanceof Error ? err : new Error(String(err)), problem);
+        return null;
+      }
+    },
+    [url, getAuthToken, trackError, authQueryParam]
+  );
+
+  const abort = useCallback(() => {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    return abort;
+  }, [abort]);
+
+  useEffect(() => {
+    if (options?.autoInvoke && shouldConnect) {
+      // Defer execution to avoid synchronous setState calls inside effects that can cause cascading renders.
+      // Scheduling with Promise resolves to a microtask to run after this effect completes.
+      Promise.resolve().then(() => {
+        execute().catch(() => {
+          // Already handled in execute
+        });
+      });
+    }
+  }, [shouldConnect, execute, options?.autoInvoke]);
 
   return { data, loading, problemDetails, execute, abort };
 }

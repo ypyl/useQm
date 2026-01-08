@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { QmProvider, useQuery, useMutation } from "./useQm";
+import { QmProvider, useQuery, useMutation, useSse } from "./useQm";
 import { type PropsWithChildren } from "react";
 
 // Mock global fetch
@@ -15,7 +15,7 @@ describe("useQm", () => {
   describe("QmProvider", () => {
     it("provides context to children", () => {
       const wrapper = ({ children }: PropsWithChildren) => (
-        <QmProvider getAuthHeader={async () => "Bearer token"}>
+        <QmProvider getAuthToken={async () => "Bearer token"}>
           {children}
         </QmProvider>
       );
@@ -81,7 +81,7 @@ describe("useQm", () => {
     it("uses getAuthHeader from provider", async () => {
       const getAuthHeader = vi.fn().mockResolvedValue("Bearer secret");
       const customWrapper = ({ children }: PropsWithChildren) => (
-        <QmProvider getAuthHeader={getAuthHeader}>{children}</QmProvider>
+        <QmProvider getAuthToken={getAuthHeader}>{children}</QmProvider>
       );
 
       globalFetch.mockResolvedValueOnce({
@@ -289,6 +289,183 @@ describe("useQm", () => {
       });
 
       expect(result.current.data).toEqual({ success: true });
+    });
+  });
+
+  describe("useSse", () => {
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <QmProvider>{children}</QmProvider>
+    );
+
+    class MockEventSource {
+      static instances: MockEventSource[] = [];
+      static lastInstance: MockEventSource | null = null;
+      url: string;
+      onopen: ((ev: Event) => void) | null = null;
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onerror: ((ev: Event) => void) | null = null;
+      closed = false;
+
+      constructor(url: string) {
+        this.url = url;
+        MockEventSource.instances.push(this);
+        MockEventSource.lastInstance = this;
+      }
+
+      close() {
+        this.closed = true;
+      }
+
+      emitOpen() {
+        if (this.onopen) {
+          this.onopen(new Event("open"));
+        }
+      }
+
+      emitMessage(data: string) {
+        if (this.onmessage) {
+          this.onmessage({ data } as unknown as MessageEvent);
+        }
+      }
+
+      emitError() {
+        if (this.onerror) {
+          this.onerror(new Event("error"));
+        }
+      }
+    }
+
+    let originalEventSource: typeof EventSource | undefined;
+
+    beforeEach(() => {
+      originalEventSource = globalThis.EventSource;
+      MockEventSource.instances = [];
+      MockEventSource.lastInstance = null;
+      globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+    });
+
+    afterEach(() => {
+      if (originalEventSource !== undefined) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // If there was no original EventSource, remove the global to avoid leaving our mock.
+        // Use delete to avoid TS complaining about assigning undefined to the global property.
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).EventSource;
+      }
+    });
+
+    it("connects and opens automatically", async () => {
+      const { result } = renderHook(() => useSse({ url: "/sse" }), {
+        wrapper,
+      });
+
+      // wait for microtask to create EventSource
+      await waitFor(() => {
+        expect(MockEventSource.lastInstance).not.toBeNull();
+      });
+
+      act(() => {
+        MockEventSource.lastInstance!.emitOpen();
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(true);
+      });
+    });
+
+    it("parses JSON messages and updates data", async () => {
+      const { result } = renderHook(() => useSse<{ value: number }>({ url: "/sse" }), {
+        wrapper,
+      });
+
+      await waitFor(() => {
+        expect(MockEventSource.lastInstance).not.toBeNull();
+      });
+
+      act(() => {
+        MockEventSource.lastInstance!.emitMessage(JSON.stringify({ value: 42 }));
+      });
+
+      await waitFor(() => {
+        expect(result.current.data).toEqual({ value: 42 });
+      });
+    });
+
+    it("sets problemDetails on parse error", async () => {
+      const { result } = renderHook(() => useSse<{ value: number }>({ url: "/sse" }), {
+        wrapper,
+      });
+
+      await waitFor(() => {
+        expect(MockEventSource.lastInstance).not.toBeNull();
+      });
+
+      act(() => {
+        MockEventSource.lastInstance!.emitMessage("not-json");
+      });
+
+      await waitFor(() => {
+        expect(result.current.problemDetails).not.toBeNull();
+      });
+
+      expect(result.current.data).toBeNull();
+    });
+
+    it("abort() closes the stream", async () => {
+      const { result } = renderHook(() => useSse({ url: "/sse" }), { wrapper });
+
+      await waitFor(() => {
+        expect(MockEventSource.lastInstance).not.toBeNull();
+      });
+
+      act(() => {
+        result.current.abort();
+      });
+
+      expect(MockEventSource.lastInstance!.closed).toBe(true);
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("execute() restarts the stream", async () => {
+      const { result } = renderHook(() => useSse({ url: "/sse" }), { wrapper });
+
+      await waitFor(() => {
+        expect(MockEventSource.lastInstance).not.toBeNull();
+      });
+
+      const first = MockEventSource.lastInstance;
+
+      act(() => {
+        result.current.abort();
+      });
+
+      expect(first!.closed).toBe(true);
+
+      act(() => {
+        result.current.execute();
+      });
+
+      await waitFor(() => {
+        expect(MockEventSource.lastInstance).not.toBe(first);
+      });
+    });
+
+    it("appends auth token to URL when getAuthHeader is provided and authQueryParam is set", async () => {
+      const getAuthHeader = vi.fn().mockResolvedValue("Bearer secret-token");
+      const customWrapper = ({ children }: PropsWithChildren) => (
+        <QmProvider getAuthToken={getAuthHeader}>{children}</QmProvider>
+      );
+
+      renderHook(() => useSse({ url: "/sse", authQueryParam: "token" }), {
+        wrapper: customWrapper,
+      });
+
+      await waitFor(() => {
+        expect(MockEventSource.lastInstance).not.toBeNull();
+      });
+
+      expect(MockEventSource.lastInstance!.url).toContain("token=secret-token");
     });
   });
 });

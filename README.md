@@ -9,8 +9,9 @@ It is designed to be **copied directly into your project** rather than being ins
 - **Decoupled States**: Separate `data`, `loading`, and `problemDetails` for clean UI logic.
 - **Problem Details Support**: Native support for `application/problem+json` style errors.
 - **Zero Configuration**: No complex setup required; `QmProvider` is optional.
-- **Type Safe**: First-class TypeScript support for both queries and mutations.
+- **Type Safe**: First-class TypeScript support for queries, mutations, and server-sent events.
 - **Auto-abort**: Automatically cancels pending requests when a component unmounts or a new request is triggered.
+- **Server-Sent Events**: Native support for real-time streaming via `useSse` with automatic reconnection.
 
 ## Installation
 
@@ -25,7 +26,7 @@ import { QmProvider } from './hooks/useQm';
 
 function Root() {
   return (
-    <QmProvider 
+    <QmProvider
       getAuthHeader={async () => `Bearer ${localStorage.getItem('token')}`}
       trackError={(err, details) => console.error(err, details)}
     >
@@ -75,7 +76,7 @@ function CreateUser() {
     const newUser = await mutate(undefined, {
       body: JSON.stringify({ name: 'New User' })
     });
-    
+
     if (newUser) {
       console.log('User created:', newUser);
     }
@@ -85,6 +86,33 @@ function CreateUser() {
     <button onClick={handleCreate} disabled={loading}>
       {loading ? 'Creating...' : 'Add User'}
     </button>
+  );
+}
+```
+
+### Server-Sent Events (`useSse`)
+
+The `useSse` hook establishes a persistent server-sent events (SSE) connection and automatically reconnects on disconnect. Messages are parsed as JSON by default.
+
+**Note**: Browser `EventSource` cannot set custom HTTP headers. Authentication is handled via query parameters (token-in-URL). Use a short-lived token or ensure your server-side implementation supports this pattern.
+
+```tsx
+import { useSse } from './hooks/useQm';
+
+function LiveUpdates() {
+  const { data: update, loading, problemDetails, abort } = useSse<Update>({
+    url: '/api/updates',
+    authQueryParam: 'access_token', // Token from getAuthHeader will be appended as query param
+  });
+
+  if (problemDetails) return <p>Connection error: {problemDetails.detail}</p>;
+
+  return (
+    <div>
+      <p>Connected: {loading ? 'Yes' : 'No'}</p>
+      {update && <p>Latest update: {update.message}</p>}
+      <button onClick={() => abort()}>Disconnect</button>
+    </div>
   );
 }
 ```
@@ -105,3 +133,11 @@ function CreateUser() {
 - **`mutate(dynamicUrl?, dynamicOptions?)`**: Function to trigger the mutation.
 - **`abort()`**: Function to cancel the current request.
 
+### `useSse<T>(options?)`
+- **`url`**: The SSE endpoint URL.
+- **`authQueryParam`**: Query parameter name for authentication token (default: `'access_token'`). If provided, the token from `getAuthHeader()` will be automatically appended to the URL.
+- **`data`**: The last received and parsed message of type `T`.
+- **`loading`**: Boolean indicating if the connection is open.
+- **`problemDetails`**: Error details if connection or message parsing fails.
+- **`execute(dynamicUrl?)`**: Function to manually open or restart the connection.
+- **`abort()`**: Function to close the connection.
