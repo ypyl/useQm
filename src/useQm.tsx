@@ -17,12 +17,13 @@ export type ProblemDetails = {
 };
 
 export interface UseFetchOptions extends Omit<RequestInit, 'body'> {
+  url?: string;
   autoInvoke?: boolean;
   responseType?: "json" | "text" | "blob";
   body?: BodyInit | Record<string, unknown> | null;
 }
 
-export type ExecuteRequest = string | (UseFetchOptions & { url?: string });
+export type ExecuteRequest = string | UseFetchOptions;
 
 export interface UseFetchReturnValue<T> {
   data: T | null;
@@ -93,9 +94,8 @@ function useCoreFetch<T>(
       if (typeof req === "string") {
         dynamicUrl = req;
       } else if (req) {
-        const { url: reqUrl, ...rest } = req as UseFetchOptions & { url?: string };
-        dynamicUrl = reqUrl;
-        dynamicOptions = rest as UseFetchOptions;
+        dynamicUrl = req.url;
+        dynamicOptions = req;
       }
 
       const currentController = new AbortController();
@@ -110,7 +110,7 @@ function useCoreFetch<T>(
         }
 
         const options = optionsRef.current;
-        const mergedOptions = { ...options, ...dynamicOptions };
+        const mergedOptions = { ...options, ...dynamicOptions } as UseFetchOptions;
         const responseType = mergedOptions.responseType;
         const method = mergedOptions.method || "GET";
 
@@ -126,8 +126,12 @@ function useCoreFetch<T>(
           body = JSON.stringify(body);
         }
 
+        // Omit url property when passing to fetch
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { url: _omitUrl, ...fetchInit } = mergedOptions as UseFetchOptions & { url?: string };
+
         const res = await fetch(url + (dynamicUrl || ""), {
-          ...mergedOptions,
+          ...fetchInit,
           signal: currentController.signal,
           method,
           headers,
@@ -220,17 +224,17 @@ function useCoreFetch<T>(
 /**
  * useQuery
  *
- * Variable signatures:
- * 1. useQuery(url, options)
+ * Usage:
+ *  useQuery({ url?, ...options? })
  */
 export function useQuery<T>(
-  url: string,
   options?: Omit<UseFetchOptions, "method">
 ) {
+  const { url = "", ...fetchOptions } = options || {};
   const { execute, ...rest } = useCoreFetch<T>(url, {
-    ...options,
+    ...fetchOptions,
     method: "GET",
-    autoInvoke: options?.autoInvoke ?? true,
+    autoInvoke: (options && options.autoInvoke) ?? true,
   });
 
   return { ...rest, query: execute };
@@ -239,25 +243,28 @@ export function useQuery<T>(
 /**
  * useMutation
  *
- * Variable signatures:
- * 1. useMutation(url, options)
+ * Usage:
+ *  useMutation({ url?, ...options? })
  */
 export function useMutation<T>(
-  url: string,
   options?: Omit<UseFetchOptions, "autoInvoke">
 ) {
+  const { url = "", ...fetchOptions } = options || {};
+
+  const headers = {
+    ...(fetchOptions.headers || {}),
+    ...(fetchOptions.headers &&
+    Object.keys(fetchOptions.headers).some(
+      (key) => key.toLowerCase() === "content-type"
+    )
+      ? {}
+      : { "Content-Type": "application/json" }),
+  };
+
   const { execute, ...rest } = useCoreFetch<T>(url, {
-    ...options,
-    method: options?.method || "POST",
-    headers: {
-      ...(options?.headers || {}),
-      ...(options?.headers &&
-      Object.keys(options.headers).some(
-        (key) => key.toLowerCase() === "content-type"
-      )
-        ? {}
-        : { "Content-Type": "application/json" }),
-    },
+    ...fetchOptions,
+    method: fetchOptions.method || "POST",
+    headers,
     autoInvoke: false,
   });
 

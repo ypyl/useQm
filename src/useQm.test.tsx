@@ -20,7 +20,7 @@ describe("useQm", () => {
         </QmProvider>
       );
 
-      const { result } = renderHook(() => useQuery("/test"), { wrapper });
+      const { result } = renderHook(() => useQuery({ url: "/test" }), { wrapper });
       // If it doesn't throw, context is provided.
       // We can check if fetch is called with auth header later.
       expect(result.current).toBeDefined();
@@ -40,7 +40,7 @@ describe("useQm", () => {
         json: async () => mockData,
       });
 
-      const { result } = renderHook(() => useQuery("/api/data"), { wrapper });
+      const { result } = renderHook(() => useQuery({ url: "/api/data" }), { wrapper });
 
       expect(result.current.loading).toBe(true);
 
@@ -65,7 +65,7 @@ describe("useQm", () => {
         json: async () => ({ title: "Not Found", status: 404 }),
       });
 
-      const { result } = renderHook(() => useQuery("/api/error"), { wrapper });
+      const { result } = renderHook(() => useQuery({ url: "/api/error" }), { wrapper });
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -90,7 +90,7 @@ describe("useQm", () => {
         json: async () => ({}),
       });
 
-      const { result } = renderHook(() => useQuery("/api/auth"), {
+      const { result } = renderHook(() => useQuery({ url: "/api/auth" }), {
         wrapper: customWrapper,
       });
 
@@ -116,7 +116,7 @@ describe("useQm", () => {
         json: async () => ({ count: 1 }),
       });
 
-      const { result } = renderHook(() => useQuery("/api/refresh"), {
+      const { result } = renderHook(() => useQuery({ url: "/api/refresh" }), {
         wrapper,
       });
 
@@ -152,7 +152,7 @@ describe("useQm", () => {
     );
 
     it("does not auto-invoke", () => {
-      const { result } = renderHook(() => useMutation("/api/create"), {
+      const { result } = renderHook(() => useMutation({ url: "/api/create" }), {
         wrapper,
       });
       expect(globalFetch).not.toHaveBeenCalled();
@@ -166,7 +166,7 @@ describe("useQm", () => {
         json: async () => ({ success: true }),
       });
 
-      const { result } = renderHook(() => useMutation("/api/create"), {
+      const { result } = renderHook(() => useMutation({ url: "/api/create" }), {
         wrapper,
       });
 
@@ -199,7 +199,7 @@ describe("useQm", () => {
         json: async () => ({ id: 1 }),
       });
 
-      const { result } = renderHook(() => useMutation("/api/test"), {
+      const { result } = renderHook(() => useMutation({ url: "/api/test" }), {
         wrapper,
       });
 
@@ -228,7 +228,7 @@ describe("useQm", () => {
         json: async () => ({ success: true }),
       });
 
-      const { result } = renderHook(() => useMutation("/api/upload"), {
+      const { result } = renderHook(() => useMutation({ url: "/api/upload" }), {
         wrapper,
       });
 
@@ -262,7 +262,7 @@ describe("useQm", () => {
       });
 
       // No wrapper provided, so QmContext will be null
-      const { result } = renderHook(() => useQuery("/api/no-provider"));
+      const { result } = renderHook(() => useQuery({ url: "/api/no-provider" }));
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -278,7 +278,7 @@ describe("useQm", () => {
         json: async () => ({ success: true }),
       });
 
-      const { result } = renderHook(() => useMutation("/api/no-provider"));
+      const { result } = renderHook(() => useMutation({ url: "/api/no-provider" }));
 
       act(() => {
         result.current.mutate();

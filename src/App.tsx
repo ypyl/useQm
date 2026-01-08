@@ -12,7 +12,7 @@ interface UserDetail extends User {
 }
 
 function UserDetails({ userId, onClose }: { userId: number; onClose: () => void }) {
-  const { data: user, loading, problemDetails } = useQuery<UserDetail>(`/api/users/${userId}`);
+  const { data: user, loading, problemDetails } = useQuery<UserDetail>({ url: `/api/users/${userId}` });
 
   return (
     <div style={{ border: "1px solid #ccc", padding: "1rem", marginTop: "1rem" }}>
@@ -55,9 +55,9 @@ interface OptimisticUser extends User {
 }
 
 function App() {
-  const { data: users, loading, problemDetails, query: refetchUsers } = useQuery<User[]>("/api/users");
-  const { mutate: createUser, loading: creating } = useMutation<User>("/api/users");
-  const { mutate: deleteUser, loading: deleting } = useMutation("/api/users", { method: "DELETE" });
+  const { data: users, loading, problemDetails, query: refetchUsers } = useQuery<User[]>({ url: "/api/users" });
+  const { mutate: createUser, loading: creating } = useMutation<User>({ url: "/api/users" });
+  const { mutate: deleteUser, loading: deleting } = useMutation({ url: "/api/users", method: "DELETE" });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [optimisticUsers, setOptimisticUsers] = useState<OptimisticUser[]>([]);
   const [deletingUserIds, setDeletingUserIds] = useState<Set<number>>(new Set());
