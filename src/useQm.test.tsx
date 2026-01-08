@@ -348,6 +348,7 @@ describe("useQm", () => {
       if (originalEventSource !== undefined) {
         globalThis.EventSource = originalEventSource;
       } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         delete (globalThis as any).EventSource;
       }
     });
