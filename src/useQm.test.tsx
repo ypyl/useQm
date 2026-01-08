@@ -348,9 +348,6 @@ describe("useQm", () => {
       if (originalEventSource !== undefined) {
         globalThis.EventSource = originalEventSource;
       } else {
-        // If there was no original EventSource, remove the global to avoid leaving our mock.
-        // Use delete to avoid TS complaining about assigning undefined to the global property.
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete (globalThis as any).EventSource;
       }
     });
