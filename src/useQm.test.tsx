@@ -79,7 +79,7 @@ describe("useQm", () => {
     });
 
     it("uses getAuthHeader from provider", async () => {
-      const getAuthHeader = vi.fn().mockResolvedValue("Bearer secret");
+      const getAuthHeader = vi.fn().mockResolvedValue("secret");
       const customWrapper = ({ children }: PropsWithChildren) => (
         <QmProvider getAuthToken={getAuthHeader}>{children}</QmProvider>
       );
@@ -356,7 +356,7 @@ describe("useQm", () => {
     });
 
     it("connects and opens automatically", async () => {
-      const { result } = renderHook(() => useSse({ url: "/sse" }), {
+      const { result } = renderHook(() => useSse({ url: "/sse", autoInvoke: true }), {
         wrapper,
       });
 
@@ -375,7 +375,7 @@ describe("useQm", () => {
     });
 
     it("parses JSON messages and updates data", async () => {
-      const { result } = renderHook(() => useSse<{ value: number }>({ url: "/sse" }), {
+      const { result } = renderHook(() => useSse<{ value: number }>({ url: "/sse", autoInvoke: true }), {
         wrapper,
       });
 
@@ -393,7 +393,7 @@ describe("useQm", () => {
     });
 
     it("sets problemDetails on parse error", async () => {
-      const { result } = renderHook(() => useSse<{ value: number }>({ url: "/sse" }), {
+      const { result } = renderHook(() => useSse<{ value: number }>({ url: "/sse", autoInvoke: true }), {
         wrapper,
       });
 
@@ -413,7 +413,7 @@ describe("useQm", () => {
     });
 
     it("abort() closes the stream", async () => {
-      const { result } = renderHook(() => useSse({ url: "/sse" }), { wrapper });
+      const { result } = renderHook(() => useSse({ url: "/sse", autoInvoke: true }), { wrapper });
 
       await waitFor(() => {
         expect(MockEventSource.lastInstance).not.toBeNull();
@@ -428,7 +428,7 @@ describe("useQm", () => {
     });
 
     it("execute() restarts the stream", async () => {
-      const { result } = renderHook(() => useSse({ url: "/sse" }), { wrapper });
+      const { result } = renderHook(() => useSse({ url: "/sse", autoInvoke: true }), { wrapper });
 
       await waitFor(() => {
         expect(MockEventSource.lastInstance).not.toBeNull();
@@ -452,12 +452,12 @@ describe("useQm", () => {
     });
 
     it("appends auth token to URL when getAuthHeader is provided and authQueryParam is set", async () => {
-      const getAuthHeader = vi.fn().mockResolvedValue("Bearer secret-token");
+      const getAuthHeader = vi.fn().mockResolvedValue("secret-token");
       const customWrapper = ({ children }: PropsWithChildren) => (
         <QmProvider getAuthToken={getAuthHeader}>{children}</QmProvider>
       );
 
-      renderHook(() => useSse({ url: "/sse", authQueryParam: "token" }), {
+      renderHook(() => useSse({ url: "/sse", authQueryParam: "token", autoInvoke: true }), {
         wrapper: customWrapper,
       });
 

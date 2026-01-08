@@ -1,13 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type PropsWithChildren,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
 
 export type ProblemDetails = {
   status: number;
@@ -16,11 +8,12 @@ export type ProblemDetails = {
   type?: string;
 };
 
-export interface UseFetchOptions extends Omit<RequestInit, 'body'> {
+export interface UseFetchOptions extends Omit<RequestInit, "body"> {
   url?: string;
   autoInvoke?: boolean;
   responseType?: "json" | "text" | "blob";
   body?: BodyInit | Record<string, unknown> | null;
+  retry?: { count: number; delay: number };
 }
 
 export type ExecuteRequest = string | UseFetchOptions;
@@ -52,11 +45,7 @@ export function QmProvider({
   getAuthToken?: GetAuthTokenFn;
   trackError?: TrackErrorFn;
 }>) {
-  return (
-    <QmContext.Provider value={{ getAuthToken, trackError }}>
-      {children}
-    </QmContext.Provider>
-  );
+  return <QmContext.Provider value={{ getAuthToken, trackError }}>{children}</QmContext.Provider>;
 }
 
 function useQmContext() {
@@ -64,16 +53,11 @@ function useQmContext() {
   return context || {};
 }
 
-function useCoreFetch<T>(
-  url: string,
-  options?: UseFetchOptions
-): UseFetchReturnValue<T> {
+function useCoreFetch<T>(url: string, options?: UseFetchOptions): UseFetchReturnValue<T> {
   const { getAuthToken, trackError } = useQmContext();
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(() => Boolean(options?.autoInvoke && url));
-  const [problemDetails, setProblemDetails] = useState<ProblemDetails | null>(
-    null
-  );
+  const [problemDetails, setProblemDetails] = useState<ProblemDetails | null>(null);
   const controller = useRef<AbortController | null>(null);
   const optionsRef = useRef(options);
 
@@ -103,100 +87,132 @@ function useCoreFetch<T>(
       setLoading(true);
       setProblemDetails(null);
 
-      try {
-        let authHeader: string | undefined;
-        if (getAuthToken) {
-          const token = await getAuthToken();
-          if (token) {
-            authHeader = `Bearer ${token}`;
+      const options = optionsRef.current;
+      const mergedOptions = { ...options, ...dynamicOptions } as UseFetchOptions;
+      const retryConfig = mergedOptions.retry;
+      let attempt = 0;
+      const maxAttempts = (retryConfig?.count || 0) + 1;
+
+      while (attempt < maxAttempts) {
+        try {
+          let authHeader: string | undefined;
+          if (getAuthToken) {
+            const token = await getAuthToken();
+            if (token) {
+              authHeader = `Bearer ${token}`;
+            }
           }
-        }
 
-        const options = optionsRef.current;
-        const mergedOptions = { ...options, ...dynamicOptions } as UseFetchOptions;
-        const responseType = mergedOptions.responseType;
-        const method = mergedOptions.method || "GET";
+          const responseType = mergedOptions.responseType;
+          const method = mergedOptions.method || "GET";
 
-        const headers: HeadersInit = {
-          ...(options?.headers || {}),
-          ...(dynamicOptions?.headers || {}),
-          ...(authHeader ? { Authorization: authHeader } : {}),
-        };
+          const headers: HeadersInit = {
+            ...(options?.headers || {}),
+            ...(dynamicOptions?.headers || {}),
+            ...(authHeader ? { Authorization: authHeader } : {}),
+          };
 
-        // Auto-serialize body if it's an object
-        let body = mergedOptions.body;
-        if (body && typeof body === 'object' && !(body instanceof FormData) && !(body instanceof URLSearchParams) && !(body instanceof ReadableStream) && !(body instanceof ArrayBuffer) && !(body instanceof Blob)) {
-          body = JSON.stringify(body);
-        }
+          // Auto-serialize body if it's an object
+          let body = mergedOptions.body;
+          if (
+            body &&
+            typeof body === "object" &&
+            !(body instanceof FormData) &&
+            !(body instanceof URLSearchParams) &&
+            !(body instanceof ReadableStream) &&
+            !(body instanceof ArrayBuffer) &&
+            !(body instanceof Blob)
+          ) {
+            body = JSON.stringify(body);
+          }
 
-        // Omit url property when passing to fetch
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { url: _omitUrl, ...fetchInit } = mergedOptions as UseFetchOptions & { url?: string };
+          const {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            url: _,
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            retry: __,
+            ...fetchInit
+          } = mergedOptions as UseFetchOptions & { url?: string };
 
-        const res = await fetch(url + (dynamicUrl || ""), {
-          ...fetchInit,
-          signal: currentController.signal,
-          method,
-          headers,
-          body,
-        });
+          const res = await fetch(url + (dynamicUrl || ""), {
+            ...fetchInit,
+            signal: currentController.signal,
+            method,
+            headers,
+            body,
+          });
 
-        const contentType = res.headers.get("content-type") || "";
-        const isJson =
-          contentType.includes("application/json") ||
-          contentType.includes("application/problem+json");
+          const contentType = res.headers.get("content-type") || "";
+          const isJson = contentType.includes("application/json") || contentType.includes("application/problem+json");
 
-        if (!res.ok) {
-          const message = isJson ? await res.json() : await res.text();
-          const problem = isJson
-            ? (message as ProblemDetails)
-            : {
-                status: res.status,
-                title: "Request failed",
-                detail: message,
-              };
+          if (!res.ok) {
+            // Retry only on 5xx errors
+            if (res.status >= 500 && res.status < 600 && attempt < maxAttempts - 1) {
+              attempt++;
+              await new Promise((resolve) => setTimeout(resolve, retryConfig!.delay));
+              continue;
+            }
+
+            const message = isJson ? await res.json() : await res.text();
+            const problem = isJson
+              ? (message as ProblemDetails)
+              : {
+                  status: res.status,
+                  title: "Request failed",
+                  detail: message,
+                };
+
+            setProblemDetails(problem);
+            trackError?.(new Error(`Error: status: ${res.status}`), problem);
+            return null;
+          }
+
+          let result: unknown;
+          if (responseType === "blob") {
+            const blob = await res.blob();
+            let filename: string | undefined;
+            const disposition = res.headers.get("Content-Disposition");
+            if (disposition) {
+              const match = disposition.match(/filename="?([^"]+)"?/);
+              if (match) filename = match[1];
+            }
+            result = { blob, filename };
+          } else if (responseType === "text") {
+            result = await res.text();
+          } else if (responseType === "json" || isJson) {
+            result = await res.json();
+          } else {
+            const text = await res.text();
+            result = { status: res.status, message: text };
+          }
+
+          setProblemDetails(null);
+          setData(result as T);
+          return result as T;
+        } catch (err: unknown) {
+          if (err instanceof Error && err.name === "AbortError") return null;
+          const problem: ProblemDetails = {
+            status: 0,
+            title: err instanceof Error ? err.name : "Network Error",
+            detail: err instanceof Error ? err.message : String(err),
+          };
           setProblemDetails(problem);
-          trackError?.(new Error(`Error: status: ${res.status}`), problem);
+          trackError?.(err instanceof Error ? err : new Error(String(err)));
           return null;
-        }
-
-        let result: unknown;
-        if (responseType === "blob") {
-          const blob = await res.blob();
-          let filename: string | undefined;
-          const disposition = res.headers.get("Content-Disposition");
-          if (disposition) {
-            const match = disposition.match(/filename="?([^"]+)"?/);
-            if (match) filename = match[1];
+        } finally {
+          if (controller.current === currentController) {
+            setLoading(false);
           }
-          result = { blob, filename };
-        } else if (responseType === "text") {
-          result = await res.text();
-        } else if (responseType === "json" || isJson) {
-          result = await res.json();
-        } else {
-          const text = await res.text();
-          result = { status: res.status, message: text };
-        }
-
-        setProblemDetails(null);
-        setData(result as T);
-        return result as T;
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name === "AbortError") return null;
-        const problem: ProblemDetails = {
-          status: 0,
-          title: err instanceof Error ? err.name : "Network Error",
-          detail: err instanceof Error ? err.message : String(err)
-        };
-        setProblemDetails(problem);
-        trackError?.(err instanceof Error ? err : new Error(String(err)));
-        return null;
-      } finally {
-        if (controller.current === currentController) {
-          setLoading(false);
         }
       }
+
+      const problem: ProblemDetails = {
+        status: 0,
+        title: "Max Retries Exceeded",
+        detail: `${maxAttempts} maximum retry attempts exceeded`,
+      };
+      setProblemDetails(problem);
+      return null;
     },
     [url, getAuthToken, trackError]
   );
@@ -230,6 +246,7 @@ export interface UseSseOptions {
   url?: string;
   autoInvoke?: boolean;
   authQueryParam?: string;
+  retry?: { count: number; delay: number };
 }
 
 function appendAuthQueryParam(url: string, token: string, paramName: string) {
@@ -244,12 +261,13 @@ function appendAuthQueryParam(url: string, token: string, paramName: string) {
 }
 
 export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
-  const { url = "", authQueryParam = "access_token" } = options || {};
+  const { url = "", authQueryParam = "access_token", retry } = options || {};
   const { getAuthToken, trackError } = useQmContext();
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [problemDetails, setProblemDetails] = useState<ProblemDetails | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const retryAttemptRef = useRef(0);
   const optionsRef = useRef(options);
 
   useEffect(() => {
@@ -258,23 +276,9 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
 
   const shouldConnect = !!url;
 
-  const execute = useCallback(
-    async (req?: ExecuteRequest): Promise<T | null> => {
-      if (esRef.current) {
-        esRef.current.close();
-        esRef.current = null;
-      }
-
-      let dynamicUrl: string | undefined;
-      if (typeof req === "string") {
-        dynamicUrl = req;
-      } else if (req) {
-        dynamicUrl = req.url;
-      }
-
-      const baseUrl = url + (dynamicUrl || "");
-
-      try {
+  const connectWithRetry = useCallback(
+    async (baseUrl: string): Promise<void> => {
+      const connect = async (): Promise<void> => {
         let finalUrl = baseUrl;
         if (authQueryParam && getAuthToken) {
           const token = await getAuthToken();
@@ -289,8 +293,7 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
         setProblemDetails(null);
 
         es.onopen = () => {
-          setLoading(true);
-          setProblemDetails(null);
+          retryAttemptRef.current = 0;
         };
 
         es.onmessage = (ev: MessageEvent) => {
@@ -308,17 +311,52 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
           }
         };
 
-        es.onerror = (ev: Event) => {
+        es.onerror = async () => {
+          es.close();
+          esRef.current = null;
           setLoading(false);
-          const problem: ProblemDetails = {
-            status: 0,
-            title: "EventSourceError",
-            detail: `EventSource connection error - ${ev.type}`,
-          };
-          setProblemDetails(problem);
-          trackError?.(new Error("EventSource error"), problem);
-        };
 
+          if (retry && retryAttemptRef.current < retry.count) {
+            retryAttemptRef.current++;
+            await new Promise((resolve) => setTimeout(resolve, retry.delay));
+            // Attempt to reconnect; connect() will refresh token on next attempt
+            connect();
+          } else {
+            const problem: ProblemDetails = {
+              status: 0,
+              title: "EventSourceError",
+              detail: "SSE connection failed",
+            };
+            setProblemDetails(problem);
+            trackError?.(new Error("EventSource error"), problem);
+          }
+        };
+      };
+
+      await connect();
+    },
+    [retry, trackError, getAuthToken, authQueryParam]
+  );
+
+  const execute = useCallback(
+    async (req?: ExecuteRequest): Promise<T | null> => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+
+      let dynamicUrl: string | undefined;
+      if (typeof req === "string") {
+        dynamicUrl = req;
+      } else if (req) {
+        dynamicUrl = req.url;
+      }
+
+      const baseUrl = url + (dynamicUrl || "");
+      retryAttemptRef.current = 0;
+
+      try {
+        await connectWithRetry(baseUrl);
         return null;
       } catch (err: unknown) {
         const problem: ProblemDetails = {
@@ -331,7 +369,7 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
         return null;
       }
     },
-    [url, getAuthToken, trackError, authQueryParam]
+    [url, trackError, connectWithRetry]
   );
 
   const abort = useCallback(() => {
@@ -367,9 +405,7 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
  * Usage:
  *  useQuery({ url?, ...options? })
  */
-export function useQuery<T>(
-  options?: Omit<UseFetchOptions, "method">
-) {
+export function useQuery<T>(options?: Omit<UseFetchOptions, "method">) {
   const { url = "", ...fetchOptions } = options || {};
   const { execute, ...rest } = useCoreFetch<T>(url, {
     ...fetchOptions,
@@ -386,17 +422,12 @@ export function useQuery<T>(
  * Usage:
  *  useMutation({ url?, ...options? })
  */
-export function useMutation<T>(
-  options?: Omit<UseFetchOptions, "autoInvoke">
-) {
+export function useMutation<T>(options?: Omit<UseFetchOptions, "autoInvoke">) {
   const { url = "", ...fetchOptions } = options || {};
 
   const headers = {
     ...(fetchOptions.headers || {}),
-    ...(fetchOptions.headers &&
-    Object.keys(fetchOptions.headers).some(
-      (key) => key.toLowerCase() === "content-type"
-    )
+    ...(fetchOptions.headers && Object.keys(fetchOptions.headers).some((key) => key.toLowerCase() === "content-type")
       ? {}
       : { "Content-Type": "application/json" }),
   };
