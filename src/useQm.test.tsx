@@ -40,7 +40,7 @@ describe("useQm", () => {
         json: async () => mockData,
       });
 
-      const { result } = renderHook(() => useQuery({ url: "/api/data" }), { wrapper });
+      const { result } = renderHook(() => useQuery({ url: "/api/data", autoInvoke: true }), { wrapper });
 
       expect(result.current.loading).toBe(true);
 
@@ -65,7 +65,7 @@ describe("useQm", () => {
         json: async () => ({ title: "Not Found", status: 404 }),
       });
 
-      const { result } = renderHook(() => useQuery({ url: "/api/error" }), { wrapper });
+      const { result } = renderHook(() => useQuery({ url: "/api/error", autoInvoke: true }), { wrapper });
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -90,7 +90,7 @@ describe("useQm", () => {
         json: async () => ({}),
       });
 
-      const { result } = renderHook(() => useQuery({ url: "/api/auth" }), {
+      const { result } = renderHook(() => useQuery({ url: "/api/auth", autoInvoke: true }), {
         wrapper: customWrapper,
       });
 
@@ -116,7 +116,7 @@ describe("useQm", () => {
         json: async () => ({ count: 1 }),
       });
 
-      const { result } = renderHook(() => useQuery({ url: "/api/refresh" }), {
+      const { result } = renderHook(() => useQuery({ url: "/api/refresh", autoInvoke: true }), {
         wrapper,
       });
 
@@ -133,7 +133,7 @@ describe("useQm", () => {
       });
 
       act(() => {
-        result.current.query();
+        result.current.execute();
       });
 
       expect(result.current.loading).toBe(true);
@@ -171,7 +171,7 @@ describe("useQm", () => {
       });
 
       act(() => {
-        result.current.mutate({
+        result.current.execute({
           body: { name: "New" },
         });
       });
@@ -206,7 +206,7 @@ describe("useQm", () => {
       const testObject = { name: "Test", value: 42 };
 
       act(() => {
-        result.current.mutate({ body: testObject });
+        result.current.execute({ body: testObject });
       });
 
       await waitFor(() => {
@@ -236,7 +236,7 @@ describe("useQm", () => {
       formData.append("file", "test");
 
       act(() => {
-        result.current.mutate({ body: formData });
+        result.current.execute({ body: formData });
       });
 
       await waitFor(() => {
@@ -262,7 +262,7 @@ describe("useQm", () => {
       });
 
       // No wrapper provided, so QmContext will be null
-      const { result } = renderHook(() => useQuery({ url: "/api/no-provider" }));
+      const { result } = renderHook(() => useQuery({ url: "/api/no-provider", autoInvoke: true }));
 
       await waitFor(() => {
         expect(result.current.loading).toBe(false);
@@ -281,7 +281,7 @@ describe("useQm", () => {
       const { result } = renderHook(() => useMutation({ url: "/api/no-provider" }));
 
       act(() => {
-        result.current.mutate();
+        result.current.execute();
       });
 
       await waitFor(() => {

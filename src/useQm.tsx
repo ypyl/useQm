@@ -26,6 +26,14 @@ export interface UseFetchReturnValue<T> {
   abort: () => void;
 }
 
+export interface UseSseReturnValue<T> {
+  data: T | null;
+  loading: boolean;
+  problemDetails: ProblemDetails | null;
+  execute: (req?: ExecuteRequest) => Promise<void>;
+  abort: () => void;
+}
+
 type TrackErrorFn = (error: Error, properties?: unknown) => void;
 type GetAuthTokenFn = () => Promise<string>;
 
@@ -182,11 +190,13 @@ function useCoreFetch<T>(url: string, options?: UseFetchOptions): UseFetchReturn
           } else if (responseType === "json" || isJson) {
             result = await res.json();
           } else {
+            // Fallback for non-JSON responses when responseType is not specified
             const text = await res.text();
             result = { status: res.status, message: text };
           }
 
           setProblemDetails(null);
+          // Type assertion: assuming the response matches the generic type T
           setData(result as T);
           return result as T;
         } catch (err: unknown) {
@@ -206,6 +216,7 @@ function useCoreFetch<T>(url: string, options?: UseFetchOptions): UseFetchReturn
         }
       }
 
+      // Max retries exceeded
       const problem: ProblemDetails = {
         status: 0,
         title: "Max Retries Exceeded",
@@ -214,7 +225,7 @@ function useCoreFetch<T>(url: string, options?: UseFetchOptions): UseFetchReturn
       setProblemDetails(problem);
       return null;
     },
-    [url, getAuthToken, trackError]
+    [url, getAuthToken, trackError],
   );
 
   const abort = useCallback(() => {
@@ -230,10 +241,10 @@ function useCoreFetch<T>(url: string, options?: UseFetchOptions): UseFetchReturn
   useEffect(() => {
     if (options?.autoInvoke && shouldFetch) {
       // Defer execution to avoid synchronous setState calls inside effects that can cause cascading renders.
-      // Scheduling with Promise resolves to a microtask to run after this effect completes.
+      // Scheduling with Promise.resolve() ensures it runs as a microtask after the current effect completes.
       Promise.resolve().then(() => {
         execute().catch(() => {
-          // Already handled in execute
+          // Errors are already handled in execute
         });
       });
     }
@@ -260,7 +271,7 @@ function appendAuthQueryParam(url: string, token: string, paramName: string) {
   }
 }
 
-export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
+export function useSse<T>(options?: UseSseOptions): UseSseReturnValue<T> {
   const { url = "", authQueryParam = "access_token", retry } = options || {};
   const { getAuthToken, trackError } = useQmContext();
   const [data, setData] = useState<T | null>(null);
@@ -299,6 +310,7 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
         es.onmessage = (ev: MessageEvent) => {
           try {
             const parsed = ev.data ? JSON.parse(ev.data) : null;
+            // Type assertion: assuming the parsed data matches the generic type T
             setData(parsed as T);
           } catch (err: unknown) {
             const problem: ProblemDetails = {
@@ -335,11 +347,11 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
 
       await connect();
     },
-    [retry, trackError, getAuthToken, authQueryParam]
+    [retry, trackError, getAuthToken, authQueryParam],
   );
 
   const execute = useCallback(
-    async (req?: ExecuteRequest): Promise<T | null> => {
+    async (req?: ExecuteRequest): Promise<void> => {
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -355,21 +367,9 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
       const baseUrl = url + (dynamicUrl || "");
       retryAttemptRef.current = 0;
 
-      try {
-        await connectWithRetry(baseUrl);
-        return null;
-      } catch (err: unknown) {
-        const problem: ProblemDetails = {
-          status: 0,
-          title: err instanceof Error ? err.name : "Error",
-          detail: err instanceof Error ? err.message : String(err),
-        };
-        setProblemDetails(problem);
-        trackError?.(err instanceof Error ? err : new Error(String(err)), problem);
-        return null;
-      }
+      await connectWithRetry(baseUrl);
     },
-    [url, trackError, connectWithRetry]
+    [url, connectWithRetry],
   );
 
   const abort = useCallback(() => {
@@ -387,10 +387,10 @@ export function useSse<T>(options?: UseSseOptions): UseFetchReturnValue<T> {
   useEffect(() => {
     if (options?.autoInvoke && shouldConnect) {
       // Defer execution to avoid synchronous setState calls inside effects that can cause cascading renders.
-      // Scheduling with Promise resolves to a microtask to run after this effect completes.
+      // Scheduling with Promise.resolve() ensures it runs as a microtask after the current effect completes.
       Promise.resolve().then(() => {
         execute().catch(() => {
-          // Already handled in execute
+          // Errors are already handled in execute
         });
       });
     }
@@ -410,10 +410,20 @@ export function useQuery<T>(options?: Omit<UseFetchOptions, "method">) {
   const { execute, ...rest } = useCoreFetch<T>(url, {
     ...fetchOptions,
     method: "GET",
-    autoInvoke: (options && options.autoInvoke) ?? true,
+    autoInvoke: options?.autoInvoke ?? false,
   });
 
-  return { ...rest, query: execute };
+  return { ...rest, execute };
+}
+
+function mergeHeaders(base: HeadersInit | undefined, additional: Record<string, string>): HeadersInit {
+  const headers = new Headers(base);
+  for (const [key, value] of Object.entries(additional)) {
+    if (!headers.has(key)) {
+      headers.set(key, value);
+    }
+  }
+  return headers;
 }
 
 /**
@@ -425,12 +435,7 @@ export function useQuery<T>(options?: Omit<UseFetchOptions, "method">) {
 export function useMutation<T>(options?: Omit<UseFetchOptions, "autoInvoke">) {
   const { url = "", ...fetchOptions } = options || {};
 
-  const headers = {
-    ...(fetchOptions.headers || {}),
-    ...(fetchOptions.headers && Object.keys(fetchOptions.headers).some((key) => key.toLowerCase() === "content-type")
-      ? {}
-      : { "Content-Type": "application/json" }),
-  };
+  const headers = mergeHeaders(fetchOptions.headers, { "Content-Type": "application/json" });
 
   const { execute, ...rest } = useCoreFetch<T>(url, {
     ...fetchOptions,
@@ -440,10 +445,7 @@ export function useMutation<T>(options?: Omit<UseFetchOptions, "autoInvoke">) {
   });
 
   return {
-    data: rest.data,
-    loading: rest.loading,
-    problemDetails: rest.problemDetails,
-    mutate: execute,
-    abort: rest.abort,
+    ...rest,
+    execute,
   };
 }

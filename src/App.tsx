@@ -55,9 +55,9 @@ interface OptimisticUser extends User {
 }
 
 function App() {
-  const { data: users, loading, problemDetails, query: refetchUsers } = useQuery<User[]>({ url: "/api/users" });
-  const { mutate: createUser, loading: creating } = useMutation<User>({ url: "/api/users" });
-  const { mutate: deleteUser, loading: deleting } = useMutation({ url: "/api/users", method: "DELETE" });
+  const { data: users, loading, problemDetails, execute: refetchUsers } = useQuery<User[]>({ url: "/api/users", autoInvoke: true });
+  const { execute: createUser, loading: creating } = useMutation<User>({ url: "/api/users" });
+  const { execute: deleteUser, loading: deleting } = useMutation({ url: "/api/users", method: "DELETE" });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [optimisticUsers, setOptimisticUsers] = useState<OptimisticUser[]>([]);
   const [deletingUserIds, setDeletingUserIds] = useState<Set<number>>(new Set());
