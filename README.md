@@ -13,6 +13,19 @@ It is designed to be **copied directly into your project** rather than being ins
 - **Auto-abort**: Automatically cancels pending requests when a component unmounts or a new request is triggered.
 - **Server-Sent Events**: Native support for real-time streaming via `useSse` with automatic reconnection.
 
+## Limitations
+
+As a lightweight alternative, `useQm` intentionally omits advanced features found in full-fledged libraries like React Query or TanStack Query:
+
+- **No Caching**: Data is not cached between requests; each fetch retrieves fresh data.
+- **No Background Refetching**: No automatic refetching on window focus, network reconnection, or stale data handling.
+- **No Debouncing or Throttling**: Requests are executed immediately without rate limiting.
+- **No Optimistic Updates**: Mutations do not support speculative UI updates.
+- **No Query Invalidation**: No mechanism to invalidate and refetch related queries after mutations.
+- **Simplified Retry Logic**: Only supports basic exponential backoff for network errors (5xx status codes).
+
+If your application requires these features, consider using a more comprehensive library. `useQm` is ideal for simple use cases where you want minimal overhead and full control.
+
 ## Installation
 
 Since `useQm` is not a package, simply copy [useQm.tsx](./src/useQm.tsx) into your project's source directory (e.g., `src/hooks/useQm.tsx`).
@@ -46,7 +59,7 @@ The `useQuery` hook handles GET requests and manages the loading state automatic
 import { useQuery } from './hooks/useQm';
 
 function UserList() {
-  const { data: users, loading, problemDetails, query: refetch } = useQuery<User[]>('/api/users');
+  const { data: users, loading, problemDetails, execute: refetch } = useQuery<User[]>('/api/users');
 
   if (loading) return <p>Loading...</p>;
   if (problemDetails) return <p>Error: {problemDetails.title}</p>;
@@ -70,10 +83,10 @@ The `useMutation` hook handles data modifications (POST, PUT, DELETE, etc.).
 import { useMutation } from './hooks/useQm';
 
 function CreateUser() {
-  const { mutate, loading } = useMutation<User>('/api/users/create');
+  const { execute: create, loading } = useMutation<User>('/api/users/create');
 
   const handleCreate = async () => {
-    const newUser = await mutate(undefined, {
+    const newUser = await create({
       body: JSON.stringify({ name: 'New User' })
     });
 
@@ -123,14 +136,14 @@ function LiveUpdates() {
 - **`data`**: The fetched data of type `T`.
 - **`loading`**: Boolean indicating if the fetch is in progress.
 - **`problemDetails`**: Error details if the request failed.
-- **`query()`**: Function to manually trigger or refetch.
+- **`execute(dynamicUrl?, dynamicOptions?)`**: Function to manually trigger or refetch. By default, does not auto-invoke; set `autoInvoke: true` in options to enable.
 - **`abort()`**: Function to cancel the current request.
 
 ### `useMutation<T>(url, options?)`
 - **`data`**: The result of the mutation.
 - **`loading`**: Boolean indicating if the mutation is in progress.
 - **`problemDetails`**: Error details if the request failed.
-- **`mutate(dynamicUrl?, dynamicOptions?)`**: Function to trigger the mutation.
+- **`execute(dynamicUrl?, dynamicOptions?)`**: Function to trigger the mutation.
 - **`abort()`**: Function to cancel the current request.
 
 ### `useSse<T>(options?)`
