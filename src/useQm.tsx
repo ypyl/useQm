@@ -175,6 +175,12 @@ function useCoreFetch<T>(url: string, options?: UseFetchOptions): UseFetchReturn
             return null;
           }
 
+          if (res.status === 204) {
+            setProblemDetails(null);
+            setData(null);
+            return null;
+          }
+
           let result: unknown;
           if (responseType === "blob") {
             const blob = await res.blob();

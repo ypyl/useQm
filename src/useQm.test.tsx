@@ -250,6 +250,27 @@ describe("useQm", () => {
         })
       );
     });
+
+    it("handles 204 No Content responses", async () => {
+      globalFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        headers: { get: () => "" }, // No content-type for 204
+      });
+
+      const { result } = renderHook(() => useMutation({ url: "/api/delete" }), {
+        wrapper,
+      });
+
+      const returnValue = await act(async () => {
+        return result.current.execute({ method: "DELETE" });
+      });
+
+      expect(returnValue).toBeNull();
+      expect(result.current.data).toBeNull();
+      expect(result.current.problemDetails).toBeNull();
+      expect(result.current.loading).toBe(false);
+    });
   });
 
   describe("Hooks without QmProvider", () => {
